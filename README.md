@@ -8,41 +8,61 @@ The agent provides a natural language chat interface to explore, analyze, and vi
 
 ## 🏗️ Architecture Overview
 
-The application is structured around a **Graph-based Workflow** (the new standard in ADK 2.0), rather than legacy class-based orchestration.
+The application is structured around a **Multi-Agent Routing Orchestrator** implemented via a **Graph-based Workflow** (the new standard in ADK 2.0). 
+
+It features an **Intent Classifier Agent** as the central router, which dynamically directs user queries to either a specialized **Lloyds Transaction Analytics Node** (linked to BigQuery) or a **Grounded Web Search Agent** (linked to Google Search).
 
 ```mermaid
 graph TD
-    START([START]) --> Node[query_lloyds_agent]
-    Node --> End([END])
+    START([START]) --> SaveInput[save_input_node]
+    SaveInput --> Classifier[classifier_agent]
+    Classifier --> Router{route_decision}
+    Router -- 'TRANSACTIONS' --> Lloyds[query_lloyds_agent]
+    Router -- 'SEARCH' --> Search[search_agent]
+    Lloyds --> END([END])
+    Search --> END
     
     subgraph Inside query_lloyds_agent
-        InitClient[1. Init Async API Client]
-        CheckState{2. Has BQ Session?}
-        CreateSession[3. Create BQ Conversation]
-        SendChat[4. Send Chat Request]
-        Stream[5. Process Stream]
-        RenderChart[6. Compile Vega-Lite to PNG]
+        InitClient[Init Async BQ Client]
+        CheckSession{Has BQ Session?}
+        CreateSession[Create BQ Conversation]
+        SendChat[Send Chat Request]
+        Stream[Process Stream]
+        RenderChart[Compile Vega-Lite to PNG]
     end
     
-    Node -.-> InitClient
-    InitClient --> CheckState
-    CheckState -- No --> CreateSession --> SendChat
-    CheckState -- Yes --> SendChat
+    Lloyds -.-> InitClient
+    InitClient --> CheckSession
+    CheckSession -- No --> CreateSession --> SendChat
+    CheckSession -- Yes --> SendChat
     SendChat --> Stream
-    Stream -- Text (Final Answer) --> YieldText[Yield Markdown Event]
-    Stream -- Chart (Vega-Lite) --> RenderChart --> YieldImage[Yield PNG Part Event]
+    Stream -- Text --> YieldText[Yield Markdown Event]
+    Stream -- Chart --> RenderChart --> YieldImage[Yield PNG Part Event]
+    
+    subgraph Inside search_agent
+        GoogleSearch[Google Search Grounding]
+    end
+    
+    Search -.-> GoogleSearch
 ```
 
 The workflow is defined in `agent.py` and mounted as the module-level `root_agent` variable, which the `adk web` runner automatically discovers and runs:
 
 ```python
 root_agent = Workflow(
-    name="lloyds_wrapped_workflow",
+    name="lloyds_wrapped_orchestrator",
     edges=[
-        ("START", query_lloyds_agent)
+        # Sequential pipeline: Save input -> Classify intent -> Decide the route
+        ("START", save_input_node, classifier_agent, route_decision),
+        # Conditional branching based on the route decision
+        (route_decision, {
+            "TRANSACTIONS": query_lloyds_agent,
+            "SEARCH": search_agent,
+        })
     ]
 )
 ```
+
 
 ---
 
@@ -121,6 +141,58 @@ chat_request = geminidataanalytics.ChatRequest(
 
 # Call the streaming chat endpoint
 stream = await client.chat(request=chat_request)
+```
+
+---
+
+## 🤖 Multi-Agent Orchestrator & Routing (In-Depth)
+
+The root agent orchestrates user requests through a sequence of cooperative nodes to deliver the right answers dynamically.
+
+### 1. The Intent Classifier (`classifier_agent`)
+This is an LLM-based agent configured to classify the user's intent. It is instruction-tuned to evaluate the query and output exactly one of two classes: `TRANSACTIONS` or `SEARCH`.
+
+```python
+classifier_agent = Agent(
+    name="classifier_agent",
+    model="gemini-2.5-flash",
+    instruction="Classify the user's message as 'TRANSACTIONS' or 'SEARCH'...",
+)
+```
+
+### 2. State-Preserving Pipeline (`save_input_node` & `route_decision`)
+Because the `classifier_agent` processes the query and outputs a single word classification (e.g., `"TRANSACTIONS"`), the original user query is replaced by this classification in the downstream data flow. 
+
+To prevent losing the user's original question:
+1.  **`save_input_node`**: Runs first, captures the user's original query, and saves it in the persistent session state (`ctx.state["original_query"]`).
+2.  **`route_decision`**: Runs after the classifier. It reads the classification word, retrieves the original query from `ctx.state`, and returns a routing `Event` containing both the target branch (`route`) and the original query as the `output` payload.
+
+```python
+def save_input_node(node_input: str):
+    return Event(state={"original_query": node_input}, output=node_input)
+
+def route_decision(node_input: str, ctx: Context):
+    intent = node_input.strip().upper()
+    original_query = ctx.state.get("original_query", "")
+    
+    if "TRANSACTIONS" in intent:
+        return Event(route="TRANSACTIONS", output=original_query)
+    else:
+        return Event(route="SEARCH", output=original_query)
+```
+
+### 3. Grounded Web Search Agent (`search_agent`)
+For general queries, the workflow routes execution to the `search_agent`. This agent is equipped with the native **Google Search Grounding tool** (`google_search`). When called, it searches the live internet to retrieve up-to-date facts and outputs the answer along with clickable citation source links.
+
+```python
+from google.adk.tools import google_search
+
+search_agent = Agent(
+    name="search_agent",
+    model="gemini-2.5-flash",
+    instruction="Answer using Google Search when needed. Always cite sources.",
+    tools=[google_search]
+)
 ```
 
 ---
