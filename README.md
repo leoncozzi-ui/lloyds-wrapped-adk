@@ -394,4 +394,96 @@ Once setup is complete, spin up the server:
 *   **SSH Tunnel**: Establish an SSH port forward (`ssh -L 8000:localhost:8000 your-remote-hostname`) and open **[http://localhost:8000](http://localhost:8000)** on your local machine.
 *   **Cloud Shell**: Click the **Web Preview** button in the top-right of your Cloud Shell panel and select **Preview on port 8000**.
 
+---
+
+## 🧠 Detailed Code & Concept Breakdown
+
+This section provides an in-depth conceptual and technical breakdown of how the Python code in `agent.py` interacts with the ADK 2.0 runtime, manages memory state, routes requests, and renders complex data visualizations entirely in memory.
+
+### 1. How Python Code Generates the Web UI (Schema-Driven UI)
+
+There is no HTML, JavaScript, or front-end configuration code in this repository. Instead, the ADK 2.0 Web UI is **entirely code-first and schema-driven**.
+
+1.  **The Entrypoint (`root_agent`)**:
+    When you run `adk web`, the server scans the project directory and looks for a module-level variable named `root_agent`. In our code, this is a `Workflow` (graph) whose very first node connected to `"START"` is the function `save_input_node`.
+2.  **Type Inference (The Chat Box)**:
+    To decide what user interface to render, the ADK web runner inspects the Python type signatures of the first node:
+    ```python
+    def save_input_node(node_input: str):
+    ```
+    Because the first parameter (`node_input`) is typed as a simple string (`str`), ADK infers that the workflow accepts plain text and automatically renders a **standard conversational Chat Box** in the browser.
+3.  **Data Ingestion**:
+    When you type a query in the chat box and hit Enter, the browser submits an API request to the backend. The ADK Runner intercepts the request and feeds your text directly as the value of the `node_input` argument in `save_input_node`.
+
+---
+
+### 2. The Three "Cargos" of the ADK `Event` Class
+
+In ADK 2.0, the `Event` object is the central data carrier. In our code, we place three different types of "cargo" inside `Event` to control data flow, memory, and routing:
+
+| Cargo Parameter | Purpose | Technical Behavior | Analogy |
+| :--- | :--- | :--- | :--- |
+| **`output`** | Passes data to the next node in the chain. | The ADK Runner extracts this value and immediately pipes it as the input parameter to the next node. | A direct physical pipeline connecting Node A ➔ Node B. |
+| **`state`** | Saves data globally across the entire session. | The ADK Runner merges this dictionary into the persistent session database (`session.db`), making it accessible via `ctx.state` to any node at any time. | Placing a note in a shared, persistent filing cabinet. |
+| **`route`** | Directs conditional branching in the graph. | The ADK Runner reads this string, consults the dictionary-based Route Map defined in the `Workflow` edges, and routes the execution flow to the matched node. | Flipping a railroad track switch. |
+
+#### Why both `state` and `output` are needed in our pipeline:
+Because the `classifier_agent` is a machine that **transforms** its input. It takes your long question (e.g., *"Create a bar chart of spending..."*) and outputs a single word (*"TRANSACTIONS"*). 
+
+Without saving the original question in the global session `state` via `save_input_node`, the downstream router (`route_decision`) would receive only the word *"TRANSACTIONS"* and would have completely lost the user's original query! Using both ensures the router can route based on the classification, but still feed the original query to the BigQuery client.
+
+---
+
+### 3. The Hybrid Worker Architecture (`query_lloyds_agent`)
+
+From the perspective of our local ADK workflow, `query_lloyds_agent` is a **pure Python function node** (a "Worker"). It does not instantiate or run a local LLM in your script's memory.
+
+However, under the hood, it is a **gateway** to a **remote, cloud-hosted LLM**:
+*   Inside the function, it uses the Google Cloud client library to make a gRPC request to the **BigQuery Conversational Analytics API**.
+*   The API connects to a highly specialized, pre-configured **Gemini Data Agent** hosted securely on Google Cloud.
+*   This cloud-hosted agent does the heavy lifting: translating natural language to SQL, running the queries on BigQuery, analyzing the result sets, and generating Vega-Lite JSON charts.
+*   Your local code simply packages the request, handles stateful turn-taking, and parses the returned stream.
+
+This modular design is highly efficient, keeping local token costs and computing power to a minimum while delegating database reasoning to Google's optimized cloud infrastructure.
+
+---
+
+### 4. Smart Payload Differentiation (Text vs. Charts)
+
+The response returned by the Conversational Analytics API is a stream of `Message` packets. To differentiate between text and visualizations, our code converts the protobuf message into a standard Python dictionary and checks for specific keys:
+
+1.  **Text Payloads**:
+    If the response contains a **`"text"`** key, we process it as text. We check the `textType`:
+    - `FINAL_RESPONSE` is yielded immediately to the user.
+    - `FOLLOWUP_QUESTIONS` are formatted into a clean bulleted list and appended at the bottom.
+2.  **Chart Payloads**:
+    If the response contains a **`"chart"`** key, we extract the nested `vegaConfig` JSON specification and trigger our in-memory compilation pipeline.
+
+Because we use two independent, sequential `if` statements, the code can process both text and a chart in a single response chunk, rendering them in the exact order they were sent.
+
+---
+
+### 5. The Rust-Powered In-Memory Chart Compiler
+
+When a chart configuration is received, we compile and render it entirely in RAM using a highly optimized three-step pipeline:
+
+```
+[Vega-Lite JSON Spec] 
+       │
+       ▼ (1. Load dict)
+  [Altair Chart]
+       │
+       ▼ (2. Compile in RAM via Rust-powered 'vl-convert')
+ [Raw PNG Bytes]
+       │
+       ▼ (3. Wrap in Multimodal Part & Yield Event)
+  [ADK Web UI] ➔ (Native HTML <img> Render)
+```
+
+1.  **Loading (Altair)**: We load the raw Vega-Lite JSON specification into an Altair `Chart` object in Python memory.
+2.  **Compilation (`vl-convert-python`)**: Rather than spawning a slow, heavy, headless web browser (like Chrome or Selenium) to render the chart, we use `vl-convert`. Written in **Rust**, it compiles the Vega-Lite JSON directly into flat PNG binary bytes in pure Python.
+3.  **RAM Buffer**: We pass an `io.BytesIO()` buffer to Altair's `save()` method. This forces the Rust compiler to write the PNG bytes directly into RAM, avoiding slow and restricted disk writes.
+4.  **Multimodal Rendering**: We wrap the raw binary bytes in a Google GenAI SDK `Part` object with `mime_type="image/png"` and yield it. The ADK 2.0 Web UI natively supports multimodal streams: when it sees the PNG part, it automatically encodes it as a Base64 data URL and renders the chart inline in the chat feed.
+
+
 
