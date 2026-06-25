@@ -295,11 +295,17 @@ Ensure you have the following installed on your system:
 *   **Google Cloud SDK (`gcloud` CLI)**: To authenticate your environment.
 
 ### 2. Clone the Repository
-Clone the repository to your remote environment and navigate into the folder:
+Clone the repository to your remote environment.
+
+> [!WARNING]
+> **Directory Naming Requirement**: The ADK loader infers the agent's name from its containing directory, which must be a valid Python identifier (letters, numbers, and underscores only). Because GitHub repository names often contain dashes (e.g. `lloyds-wrapped-adk`), you **must** clone the repository into a directory name using underscores (e.g. `lloyds_wrapped_adk`), otherwise the server will fail with `ValueError: Invalid agent name`.
+
+Clone the repository into a folder with underscores and enter it:
 ```bash
-git clone <your-github-repository-url>
-cd lloydsteam6
+git clone <your-github-repository-url> lloyds_wrapped_adk
+cd lloyds_wrapped_adk
 ```
+
 
 ### 3. Initialize Virtual Environment & Install Dependencies
 Use `uv` to initialize the project environment and install the required packages. This will automatically set up the virtual environment (`.venv`):
