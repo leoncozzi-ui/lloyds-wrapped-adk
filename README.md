@@ -358,12 +358,20 @@ Ensure the constants in the top section of `query_lloyds_agent` in `agent.py` ma
 
 ### 7. Run the Web Server
 Once setup is complete, spin up the server:
-```bash
-uv run adk web --port 8000 ./
-```
-If you are connected to the environment via SSH, you can access the Web UI from your local machine by establishing an SSH port forward:
-```bash
-ssh -L 8000:localhost:8000 your-remote-hostname
-```
-Then, open your local browser to **[http://localhost:8000](http://localhost:8000)** and start chatting!
+
+*   **For Local or SSH Port-forwarding environments**:
+    ```bash
+    uv run adk web --port 8000 ./
+    ```
+*   **For Google Cloud Shell (Web Preview) or proxied environments**:
+    If you are running the server in Google Cloud Shell and accessing it via the **Web Preview** feature, you **must** pass the `--allow_origins="*"` flag to prevent CORS security blocks (`403 Forbidden` errors) when the browser attempts to initialize chat sessions:
+    ```bash
+    uv run adk web --port 8000 --allow_origins="*" ./
+    ```
+
+#### Accessing the Web UI:
+*   **Local**: Open your browser to **[http://localhost:8000](http://localhost:8000)**.
+*   **SSH Tunnel**: Establish an SSH port forward (`ssh -L 8000:localhost:8000 your-remote-hostname`) and open **[http://localhost:8000](http://localhost:8000)** on your local machine.
+*   **Cloud Shell**: Click the **Web Preview** button in the top-right of your Cloud Shell panel and select **Preview on port 8000**.
+
 

@@ -1,0 +1,5 @@
+# Ignore local sandboxed test directories
+sandbox_test/
+.venv/
+__pycache__/
+.adk/
