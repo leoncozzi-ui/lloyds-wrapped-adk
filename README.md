@@ -242,7 +242,7 @@ uv add google-adk google-cloud-geminidataanalytics altair vl-convert-python pand
 > Installing `vl-convert-python` is **critical**. It allows Altair to compile Vega-Lite specifications directly to PNG images in Python, bypassing the need to install a headless browser (like Chrome or Selenium) on your system.
 
 ### 4. Authenticate with Google Cloud
-The agent relies on your local Application Default Credentials (ADC) to interact with the Google Cloud Conversational Analytics API. 
+The agent relies on your local Application Default Credentials (ADC) to interact with both the BigQuery Conversational Analytics API and the Vertex AI platform.
 
 1.  **Authenticate your gcloud CLI**:
     ```bash
@@ -258,11 +258,19 @@ The agent relies on your local Application Default Credentials (ADC) to interact
     gcloud config set project edb-hack2026-team6
     ```
 
+> [!IMPORTANT]
+> **Avoid Credential Mismatches (Gcloud vs. ADC)**:
+> In Google Cloud development, Python libraries (like the ADK agent) use the identity configured in your **ADC file** (`~/.config/gcloud/application_default_credentials.json`), **not** your active `gcloud config` CLI account.
+> 
+> If you encounter errors like `No API key was provided` or `403 Permission Denied (aiplatform.endpoints.predict)`, it is highly likely that your ADC file is pointing to a different/legacy Google account (e.g. an external or personal domain) instead of your active workshop/organization account. To resolve this, run `gcloud auth application-default login` and authenticate with the **exact same account** that owns the Google Cloud project.
+
 ### 5. IAM Permissions Checklist
-Ensure that the Google Cloud identity you logged in with (shown in `gcloud auth list`) has the following IAM roles assigned in the project `edb-hack2026-team6`:
-1.  **`roles/geminidataanalytics.dataAgentOwner`** (Gemini Data Analytics Data Agent Owner): Required to query the Conversational Analytics API, create stateful conversations, and read the data agent's configuration.
-2.  **`roles/cloudaicompanion.user`** (Gemini for Google Cloud User): Required to authorize interactions with the Gemini companion infrastructure.
-3.  **`roles/bigquery.dataViewer`** and **`roles/bigquery.jobUser`**: Required because the Conversational Analytics API queries the underlying BigQuery tables (such as `banking_wrapped.customers` and `banking_wrapped.transactions`) using your credentials.
+Ensure that the Google Cloud identity configured in your Application Default Credentials (ADC) has the following IAM roles assigned in the project `edb-hack2026-team6`:
+1.  **`roles/aiplatform.user`** (Vertex AI User): **Critical**. Required by the `classifier_agent` and `search_agent` to invoke foundation models (like `gemini-2.5-flash`) on the Vertex AI platform.
+2.  **`roles/geminidataanalytics.dataAgentOwner`** (Gemini Data Analytics Data Agent Owner): Required to query the Conversational Analytics API, create stateful conversations, and read the data agent's configuration.
+3.  **`roles/cloudaicompanion.user`** (Gemini for Google Cloud User): Required to authorize interactions with the Gemini companion infrastructure.
+4.  **`roles/bigquery.dataViewer`** and **`roles/bigquery.jobUser`**: Required because the Conversational Analytics API queries the underlying BigQuery tables (such as `banking_wrapped.customers` and `banking_wrapped.transactions`) using your credentials.
+
 
 ### 6. Verify Configuration
 Ensure the constants in the top section of `query_lloyds_agent` in `agent.py` match your target deployment:

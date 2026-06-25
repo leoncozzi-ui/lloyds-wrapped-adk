@@ -1,6 +1,13 @@
 import io
+import os
 import uuid
 import altair as alt
+
+# Configure ADK to use Vertex AI and Google Cloud credentials
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "TRUE"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "edb-hack2026-team6"
+os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1"
+
 from google.adk import Workflow, Event, Context, Agent
 from google.adk.tools import google_search
 from google.genai import types
