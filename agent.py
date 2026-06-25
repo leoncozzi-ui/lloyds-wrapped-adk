@@ -1,12 +1,66 @@
 import io
 import uuid
 import altair as alt
-from google.adk import Workflow, Event, Context
+from google.adk import Workflow, Event, Context, Agent
+from google.adk.tools import google_search
 from google.genai import types
 from google.cloud import geminidataanalytics
 from google.api_core import client_options
 from google.protobuf.json_format import MessageToDict
 
+# =====================================================================
+# 1. Intent Classifier Agent (LLM Router)
+# =====================================================================
+classifier_agent = Agent(
+    name="classifier_agent",
+    model="gemini-2.5-flash",
+    instruction="""
+    You are an orchestrator that routes user questions. 
+    Analyze the user's message and classify it into exactly one of two categories:
+    - 'TRANSACTIONS': If the user is asking about Lloyds customer spending, transactions, app sessions, features visited, cashback, or anything specific to the Lloyds banking customer dataset.
+    - 'SEARCH': If the user is asking general questions, web search queries, news, weather, calculations, or anything else not related to the Lloyds customer dataset.
+    
+    You must output exactly the word 'TRANSACTIONS' or 'SEARCH'. Do not output any other text, explanation, or punctuation.
+    """
+)
+
+def save_input_node(node_input: str):
+    """
+    Helper node that runs first to save the user's original query 
+    in the session state before we pass the query to the classifier agent.
+    """
+    return Event(state={"original_query": node_input}, output=node_input)
+
+def route_decision(node_input: str, ctx: Context):
+    """
+    Helper node that reads the classification result and routes to the 
+    appropriate branch, forwarding the user's original query as the output.
+    """
+    intent = node_input.strip().upper()
+    original_query = ctx.state.get("original_query", "")
+    
+    if "TRANSACTIONS" in intent:
+        return Event(route="TRANSACTIONS", output=original_query)
+    else:
+        return Event(route="SEARCH", output=original_query)
+
+# =====================================================================
+# 2. General Internet Search Agent (with Google Search Grounding)
+# =====================================================================
+search_agent = Agent(
+    name="search_agent",
+    model="gemini-2.5-flash",
+    instruction="""
+    You are a professional, helpful assistant with access to real-time information via Google Search.
+    Answer the user's question accurately using the search results. 
+    Always cite your sources by providing links to the sites you got the information from.
+    """,
+    tools=[google_search]
+)
+
+# =====================================================================
+# 3. Lloyds Transaction Analytics Node (BigQuery Client Worker)
+# =====================================================================
 async def query_lloyds_agent(node_input: str, ctx: Context):
     """
     Custom workflow node that communicates with the BigQuery Conversational Analytics API.
@@ -101,10 +155,18 @@ async def query_lloyds_agent(node_input: str, ctx: Context):
                 except Exception as chart_err:
                     yield Event(message=f"\n*(Error rendering visualization: {chart_err})*\n")
 
-# Define the ADK 2.0 Workflow Graph
+# =====================================================================
+# 4. Define the Master Orchestrator Graph
+# =====================================================================
 root_agent = Workflow(
-    name="lloyds_wrapped_workflow",
+    name="lloyds_wrapped_orchestrator",
     edges=[
-        ("START", query_lloyds_agent)
+        # Sequential pipeline: Save input -> Classify intent -> Decide the route
+        ("START", save_input_node, classifier_agent, route_decision),
+        # Conditional branching based on the route decision
+        (route_decision, {
+            "TRANSACTIONS": query_lloyds_agent,
+            "SEARCH": search_agent,
+        })
     ]
 )
