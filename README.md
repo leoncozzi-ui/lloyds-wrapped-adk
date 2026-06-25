@@ -485,5 +485,41 @@ When a chart configuration is received, we compile and render it entirely in RAM
 3.  **RAM Buffer**: We pass an `io.BytesIO()` buffer to Altair's `save()` method. This forces the Rust compiler to write the PNG bytes directly into RAM, avoiding slow and restricted disk writes.
 4.  **Multimodal Rendering**: We wrap the raw binary bytes in a Google GenAI SDK `Part` object with `mime_type="image/png"` and yield it. The ADK 2.0 Web UI natively supports multimodal streams: when it sees the PNG part, it automatically encodes it as a Base64 data URL and renders the chart inline in the chat feed.
 
+---
+
+## 📚 Developer Glossary & Advanced Concepts
+
+To help developers new to this architecture understand some of the advanced terms and engineering choices in this repository, here is a quick conceptual glossary:
+
+### 1. What is a "Headless Web Browser"?
+A **headless web browser** is a standard web browser (like Google Chrome or Firefox) that runs **without a graphical user interface (GUI)**. It has no window, no buttons, no address bar, and nothing displays on your screen. Instead, it runs entirely in the background, controlled programmatically via code.
+
+#### Why we wanted to AVOID it in our project:
+JavaScript-based charts (like Vega-Lite) require a browser's JavaScript engine to execute and draw. Historically, Python libraries like Altair had to spawn a headless Chrome browser in the background to render the chart and take a "screenshot" to save it as a PNG.
+
+However, headless browsers are:
+*   **Heavy**: Spawning Chrome eats massive CPU and RAM.
+*   **Incompatible with cloud servers**: Server environments (like Google Cloud Shell, Cloud Run, or Docker containers) are pure terminal environments. They do not have Chrome or display libraries installed. Trying to run a headless browser there will crash immediately with `No display specified` errors.
+
+By using `vl-convert-python` (which compiles the chart in-memory via a Rust-based engine), we completely bypassed the need for a headless browser, allowing the code to run **flawlessly in Google Cloud Shell**!
+
+---
+
+### 2. What are "Protocol Buffers (Protobuf)"?
+**Protocol Buffers (Protobuf)** is a highly optimized, binary-based **data serialization format** developed by Google. It is used to convert complex code objects into compact binary payloads so they can be transmitted over a network or saved to disk.
+
+#### JSON vs. Protobuf Analogy:
+*   **JSON** is like sending a handwritten letter in plain text. It is human-readable, but takes up massive space, contains redundant keys, and takes longer for a machine to parse.
+*   **Protobuf** is like translating that letter into a highly optimized **binary code**. It is unreadable to humans, but machines can pack, transmit, and unpack it almost instantaneously using a fraction of the network bandwidth.
+
+#### Why we used `MessageToDict` in our code:
+All Google Cloud gRPC APIs (like the Conversational Analytics API) use Protobuf under the hood for all requests and responses (`ChatRequest`, `Message`, etc.). 
+
+Because Protobuf objects are compiled binary structures, they can be rigid and tricky to query dynamically in Python. To make development simple, we imported `MessageToDict` at the top of `agent.py` and ran:
+```python
+sys_msg_dict = MessageToDict(sys_msg._pb)
+```
+This converted the compiled binary Protobuf object (`sys_msg._pb`) into a standard **Python dictionary**, allowing us to query keys easily using simple, readable Python syntax like `if "text" in sys_msg_dict:`.
+
 
 
