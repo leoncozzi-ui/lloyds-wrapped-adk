@@ -278,6 +278,26 @@ If you are already in the project directory with dependencies installed:
 
 ---
 
+## 🎯 Sample Questions to Test Your Orchestrator
+
+To verify that the intent-based routing and multi-agent execution are working correctly, try entering these sample queries in the chat box:
+
+### 1. 📊 Routed to Lloyds Transaction Agent (BigQuery + Inline Charts)
+Queries about customer spending, banking transaction records, app sessions, or cashback rewards:
+*   💬 **`Create a bar chart showing the total spending by customer.`**
+    *   *Expected Behavior:* The orchestrator routes the query to the BQ Analytics node, which queries the database, compiles a horizontal bar chart, and displays the chart natively inline.
+*   💬 **`How much cashback has Bob earned in total?`**
+    *   *Expected Behavior:* The orchestrator routes to the BQ Analytics node, which queries Bob's transaction history and returns his total cashback.
+
+### 2. 🌐 Routed to Internet Search Agent (Google Search Grounding)
+Queries about general facts, current events, calculations, or real-time news:
+*   💬 **`What are the latest news headlines about Lloyds Banking Group?`**
+    *   *Expected Behavior:* The orchestrator routes the query to the general search agent, which queries Google Search in real-time and returns the news summary along with clickable cited source links.
+*   💬 **`Who won the most recent matches in the Premier League?`**
+    *   *Expected Behavior:* The orchestrator routes to the search agent, which searches the web for live sports scores and cites its sources.
+
+---
+
 ## 🌐 Remote Setup & Cloning Guide
 
 To clone this repository and set up this Conversational Analytics Agent on a new machine or cloud environment, follow this step-by-step guide.
