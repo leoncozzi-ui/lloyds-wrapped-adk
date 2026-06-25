@@ -6,6 +6,122 @@ The agent provides a natural language chat interface to explore, analyze, and vi
 
 ---
 
+## 🌐 Remote Setup & Cloning Guide
+
+To clone this repository and set up this Conversational Analytics Agent on a new machine or cloud environment, follow this step-by-step guide.
+
+### 1. Prerequisites
+Ensure you have the following installed on your system:
+*   **Python 3.12+**
+*   **Git**
+*   **`uv`**: A fast Python package installer and resolver.
+    *   *To install `uv`*:
+        ```bash
+        pip install uv
+        ```
+        *(Or use the official installer: `curl -LsSf https://astral.sh/uv/install.sh | sh`)*
+*   **Google Cloud SDK (`gcloud` CLI)**: To authenticate your environment.
+
+### 2. Clone the Repository
+Clone the repository to your remote environment.
+
+> [!WARNING]
+> **Directory Naming Requirement**: The ADK loader infers the agent's name from its containing directory, which must be a valid Python identifier (letters, numbers, and underscores only). Because GitHub repository names often contain dashes (e.g. `lloyds-wrapped-adk`), you **must** clone the repository into a directory name using underscores (e.g. `lloyds_wrapped_adk`), otherwise the server will fail with `ValueError: Invalid agent name`.
+
+Clone the repository into a folder with underscores and enter it:
+```bash
+git clone <your-github-repository-url> lloyds_wrapped_adk
+cd lloyds_wrapped_adk
+```
+
+### 3. Initialize Virtual Environment & Install Dependencies
+Use `uv` to initialize the project environment and install the required packages. This will automatically set up the virtual environment (`.venv`):
+```bash
+# Initialize project environment
+uv venv
+
+# Install ADK, Conversational Analytics client, and Altair chart rendering packages
+uv add google-adk google-cloud-geminidataanalytics altair vl-convert-python pandas
+```
+> [!NOTE]
+> Installing `vl-convert-python` is **critical**. It allows Altair to compile Vega-Lite specifications directly to PNG images in Python, bypassing the need to install a headless browser (like Chrome or Selenium) on your system.
+
+### 4. Authenticate with Google Cloud
+The agent relies on your local Application Default Credentials (ADC) to interact with both the BigQuery Conversational Analytics API and the Vertex AI platform.
+
+1.  **Authenticate your gcloud CLI**:
+    ```bash
+    gcloud auth login
+    ```
+2.  **Authenticate Application Default Credentials (ADC)**:
+    ```bash
+    gcloud auth application-default login
+    ```
+3.  **Configure your target Google Cloud Project**:
+    Set the active project to the one containing the BQ agent:
+    ```bash
+    gcloud config set project edb-hack2026-team6
+    ```
+
+> [!IMPORTANT]
+> **Avoid Credential Mismatches (Gcloud vs. ADC)**:
+> In Google Cloud development, Python libraries (like the ADK agent) use the identity configured in your **ADC file** (`~/.config/gcloud/application_default_credentials.json`), **not** your active `gcloud config` CLI account.
+> 
+> If you encounter errors like `No API key was provided` or `403 Permission Denied (aiplatform.endpoints.predict)`, it is highly likely that your ADC file is pointing to a different/legacy Google account (e.g. an external or personal domain) instead of your active workshop/organization account. To resolve this, run `gcloud auth application-default login` and authenticate with the **exact same account** that owns the Google Cloud project.
+
+### 5. IAM Permissions Checklist
+Ensure that the Google Cloud identity configured in your Application Default Credentials (ADC) has the following IAM roles assigned in the project `edb-hack2026-team6`:
+1.  **`roles/aiplatform.user`** (Vertex AI User): **Critical**. Required by the `classifier_agent` and `search_agent` to invoke foundation models (like `gemini-2.5-flash`) on the Vertex AI platform.
+2.  **`roles/geminidataanalytics.dataAgentOwner`** (Gemini Data Analytics Data Agent Owner): Required to query the Conversational Analytics API, create stateful conversations, and read the data agent's configuration.
+3.  **`roles/cloudaicompanion.user`** (Gemini for Google Cloud User): Required to authorize interactions with the Gemini companion infrastructure.
+4.  **`roles/bigquery.dataViewer`** and **`roles/bigquery.jobUser`**: Required because the Conversational Analytics API queries the underlying BigQuery tables (such as `banking_wrapped.customers` and `banking_wrapped.transactions`) using your credentials.
+
+### 6. Verify Configuration
+Ensure the constants in the top section of `query_lloyds_agent` in `agent.py` match your target deployment:
+*   `billing_project = "edb-hack2026-team6"`
+*   `location = "us"`
+*   `data_agent_id = "agent_8f5e5cf8-79bf-4095-87d1-08477f4a668b"`
+
+### 7. Run the Web Server
+Once setup is complete, spin up the server:
+
+*   **For Local or SSH Port-forwarding environments**:
+    ```bash
+    uv run adk web --port 8000 ./
+    ```
+*   **For Google Cloud Shell (Web Preview) or proxied environments**:
+    If you are running the server in Google Cloud Shell and accessing it via the **Web Preview** feature, you **must** pass the `--allow_origins="*"` flag to prevent CORS security blocks (`403 Forbidden` errors) when the browser attempts to initialize chat sessions:
+    ```bash
+    uv run adk web --port 8000 --allow_origins="*" ./
+    ```
+
+#### Accessing the Web UI:
+*   **Local**: Open your browser to **[http://localhost:8000](http://localhost:8000)**.
+*   **SSH Tunnel**: Establish an SSH port forward (`ssh -L 8000:localhost:8000 your-remote-hostname`) and open **[http://localhost:8000](http://localhost:8000)** on your local machine.
+*   **Cloud Shell**: Click the **Web Preview** button in the top-right of your Cloud Shell panel and select **Preview on port 8000**.
+
+---
+
+## 🎯 Sample Questions to Test Your Orchestrator
+
+To verify that the intent-based routing and multi-agent execution are working correctly, try entering these sample queries in the chat box:
+
+### 1. 📊 Routed to Lloyds Transaction Agent (BigQuery + Inline Charts)
+Queries about customer spending, banking transaction records, app sessions, or cashback rewards:
+*   💬 **`Create a bar chart showing the total spending by customer.`**
+    *   *Expected Behavior:* The orchestrator routes the query to the BQ Analytics node, which queries the database, compiles a horizontal bar chart, and displays the chart natively inline.
+*   💬 **`How much cashback has Bob earned in total?`**
+    *   *Expected Behavior:* The orchestrator routes to the BQ Analytics node, which queries Bob's transaction history and returns his total cashback.
+
+### 2. 🌐 Routed to Internet Search Agent (Google Search Grounding)
+Queries about general facts, current events, calculations, or real-time news:
+*   💬 **`What are the latest news headlines about Lloyds Banking Group?`**
+    *   *Expected Behavior:* The orchestrator routes the query to the general search agent, which queries Google Search in real-time and returns the news summary along with clickable cited source links.
+*   💬 **`Who won the most recent matches in the Premier League?`**
+    *   *Expected Behavior:* The orchestrator routes to the search agent, which searches the web for live sports scores and cites its sources.
+
+---
+
 ## 🏗️ Architecture Overview
 
 The application is structured around a **Multi-Agent Routing Orchestrator** implemented via a **Graph-based Workflow** (the new standard in ADK 2.0). 
@@ -62,7 +178,6 @@ root_agent = Workflow(
     ]
 )
 ```
-
 
 ---
 
@@ -278,124 +393,6 @@ If you are already in the project directory with dependencies installed:
 
 ---
 
-## 🎯 Sample Questions to Test Your Orchestrator
-
-To verify that the intent-based routing and multi-agent execution are working correctly, try entering these sample queries in the chat box:
-
-### 1. 📊 Routed to Lloyds Transaction Agent (BigQuery + Inline Charts)
-Queries about customer spending, banking transaction records, app sessions, or cashback rewards:
-*   💬 **`Create a bar chart showing the total spending by customer.`**
-    *   *Expected Behavior:* The orchestrator routes the query to the BQ Analytics node, which queries the database, compiles a horizontal bar chart, and displays the chart natively inline.
-*   💬 **`How much cashback has Bob earned in total?`**
-    *   *Expected Behavior:* The orchestrator routes to the BQ Analytics node, which queries Bob's transaction history and returns his total cashback.
-
-### 2. 🌐 Routed to Internet Search Agent (Google Search Grounding)
-Queries about general facts, current events, calculations, or real-time news:
-*   💬 **`What are the latest news headlines about Lloyds Banking Group?`**
-    *   *Expected Behavior:* The orchestrator routes the query to the general search agent, which queries Google Search in real-time and returns the news summary along with clickable cited source links.
-*   💬 **`Who won the most recent matches in the Premier League?`**
-    *   *Expected Behavior:* The orchestrator routes to the search agent, which searches the web for live sports scores and cites its sources.
-
----
-
-## 🌐 Remote Setup & Cloning Guide
-
-To clone this repository and set up this Conversational Analytics Agent on a new machine or cloud environment, follow this step-by-step guide.
-
-### 1. Prerequisites
-Ensure you have the following installed on your system:
-*   **Python 3.12+**
-*   **Git**
-*   **`uv`**: A fast Python package installer and resolver.
-    *   *To install `uv`*:
-        ```bash
-        pip install uv
-        ```
-        *(Or use the official installer: `curl -LsSf https://astral.sh/uv/install.sh | sh`)*
-*   **Google Cloud SDK (`gcloud` CLI)**: To authenticate your environment.
-
-### 2. Clone the Repository
-Clone the repository to your remote environment.
-
-> [!WARNING]
-> **Directory Naming Requirement**: The ADK loader infers the agent's name from its containing directory, which must be a valid Python identifier (letters, numbers, and underscores only). Because GitHub repository names often contain dashes (e.g. `lloyds-wrapped-adk`), you **must** clone the repository into a directory name using underscores (e.g. `lloyds_wrapped_adk`), otherwise the server will fail with `ValueError: Invalid agent name`.
-
-Clone the repository into a folder with underscores and enter it:
-```bash
-git clone <your-github-repository-url> lloyds_wrapped_adk
-cd lloyds_wrapped_adk
-```
-
-
-### 3. Initialize Virtual Environment & Install Dependencies
-Use `uv` to initialize the project environment and install the required packages. This will automatically set up the virtual environment (`.venv`):
-```bash
-# Initialize project environment
-uv venv
-
-# Install ADK, Conversational Analytics client, and Altair chart rendering packages
-uv add google-adk google-cloud-geminidataanalytics altair vl-convert-python pandas
-```
-> [!NOTE]
-> Installing `vl-convert-python` is **critical**. It allows Altair to compile Vega-Lite specifications directly to PNG images in Python, bypassing the need to install a headless browser (like Chrome or Selenium) on your system.
-
-### 4. Authenticate with Google Cloud
-The agent relies on your local Application Default Credentials (ADC) to interact with both the BigQuery Conversational Analytics API and the Vertex AI platform.
-
-1.  **Authenticate your gcloud CLI**:
-    ```bash
-    gcloud auth login
-    ```
-2.  **Authenticate Application Default Credentials (ADC)**:
-    ```bash
-    gcloud auth application-default login
-    ```
-3.  **Configure your target Google Cloud Project**:
-    Set the active project to the one containing the BQ agent:
-    ```bash
-    gcloud config set project edb-hack2026-team6
-    ```
-
-> [!IMPORTANT]
-> **Avoid Credential Mismatches (Gcloud vs. ADC)**:
-> In Google Cloud development, Python libraries (like the ADK agent) use the identity configured in your **ADC file** (`~/.config/gcloud/application_default_credentials.json`), **not** your active `gcloud config` CLI account.
-> 
-> If you encounter errors like `No API key was provided` or `403 Permission Denied (aiplatform.endpoints.predict)`, it is highly likely that your ADC file is pointing to a different/legacy Google account (e.g. an external or personal domain) instead of your active workshop/organization account. To resolve this, run `gcloud auth application-default login` and authenticate with the **exact same account** that owns the Google Cloud project.
-
-### 5. IAM Permissions Checklist
-Ensure that the Google Cloud identity configured in your Application Default Credentials (ADC) has the following IAM roles assigned in the project `edb-hack2026-team6`:
-1.  **`roles/aiplatform.user`** (Vertex AI User): **Critical**. Required by the `classifier_agent` and `search_agent` to invoke foundation models (like `gemini-2.5-flash`) on the Vertex AI platform.
-2.  **`roles/geminidataanalytics.dataAgentOwner`** (Gemini Data Analytics Data Agent Owner): Required to query the Conversational Analytics API, create stateful conversations, and read the data agent's configuration.
-3.  **`roles/cloudaicompanion.user`** (Gemini for Google Cloud User): Required to authorize interactions with the Gemini companion infrastructure.
-4.  **`roles/bigquery.dataViewer`** and **`roles/bigquery.jobUser`**: Required because the Conversational Analytics API queries the underlying BigQuery tables (such as `banking_wrapped.customers` and `banking_wrapped.transactions`) using your credentials.
-
-
-### 6. Verify Configuration
-Ensure the constants in the top section of `query_lloyds_agent` in `agent.py` match your target deployment:
-*   `billing_project = "edb-hack2026-team6"`
-*   `location = "us"`
-*   `data_agent_id = "agent_8f5e5cf8-79bf-4095-87d1-08477f4a668b"`
-
-### 7. Run the Web Server
-Once setup is complete, spin up the server:
-
-*   **For Local or SSH Port-forwarding environments**:
-    ```bash
-    uv run adk web --port 8000 ./
-    ```
-*   **For Google Cloud Shell (Web Preview) or proxied environments**:
-    If you are running the server in Google Cloud Shell and accessing it via the **Web Preview** feature, you **must** pass the `--allow_origins="*"` flag to prevent CORS security blocks (`403 Forbidden` errors) when the browser attempts to initialize chat sessions:
-    ```bash
-    uv run adk web --port 8000 --allow_origins="*" ./
-    ```
-
-#### Accessing the Web UI:
-*   **Local**: Open your browser to **[http://localhost:8000](http://localhost:8000)**.
-*   **SSH Tunnel**: Establish an SSH port forward (`ssh -L 8000:localhost:8000 your-remote-hostname`) and open **[http://localhost:8000](http://localhost:8000)** on your local machine.
-*   **Cloud Shell**: Click the **Web Preview** button in the top-right of your Cloud Shell panel and select **Preview on port 8000**.
-
----
-
 ## 🧠 Detailed Code & Concept Breakdown
 
 This section provides an in-depth conceptual and technical breakdown of how the Python code in `agent.py` interacts with the ADK 2.0 runtime, manages memory state, routes requests, and renders complex data visualizations entirely in memory.
@@ -520,6 +517,3 @@ Because Protobuf objects are compiled binary structures, they can be rigid and t
 sys_msg_dict = MessageToDict(sys_msg._pb)
 ```
 This converted the compiled binary Protobuf object (`sys_msg._pb`) into a standard **Python dictionary**, allowing us to query keys easily using simple, readable Python syntax like `if "text" in sys_msg_dict:`.
-
-
-
